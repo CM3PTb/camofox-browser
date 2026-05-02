@@ -972,6 +972,76 @@ export async function getLinks(
 	};
 }
 
+export async function clickAt(tabId: string, tabState: TabState, params: { x: number; y: number }): Promise<{ ok: true; url: string }>{
+	const { x, y } = params;
+	if (typeof x !== 'number' || typeof y !== 'number' || isNaN(x) || isNaN(y)) {
+		const err = new Error('x and y must be valid numbers');
+		(err as Error & { statusCode?: number }).statusCode = 400;
+		throw err;
+	}
+
+	return withTabLock(tabId, async () => {
+		// Real Playwright mouse sequence: move → down → up (with delays)
+		await tabState.page.mouse.move(x, y);
+		await tabState.page.waitForTimeout(50);
+		await tabState.page.mouse.down();
+		await tabState.page.waitForTimeout(50);
+		await tabState.page.mouse.up();
+
+		log('info', 'clickAt dispatched', { tabId, x: x.toFixed(0), y: y.toFixed(0) });
+
+		await tabState.page.waitForTimeout(500);
+		tabState.refs = await buildRefs(tabState.page);
+
+		const newUrl = tabState.page.url();
+		tabState.visitedUrls.add(newUrl);
+		return { ok: true as const, url: newUrl };
+	});
+}
+
+export async function moveMouseTo(tabId: string, tabState: TabState, params: { x: number; y: number }): Promise<{ ok: true; url: string }>{
+	const { x, y } = params;
+	if (typeof x !== 'number' || typeof y !== 'number' || isNaN(x) || isNaN(y)) {
+		const err = new Error('x and y must be valid numbers');
+		(err as Error & { statusCode?: number }).statusCode = 400;
+		throw err;
+	}
+
+	return withTabLock(tabId, async () => {
+		await tabState.page.mouse.move(x, y);
+		log('info', 'moveMouseTo dispatched', { tabId, x: x.toFixed(0), y: y.toFixed(0) });
+		return { ok: true as const, url: tabState.page.url() };
+	});
+}
+
+export async function dragMouse(tabId: string, tabState: TabState, params: { x1: number; y1: number; x2: number; y2: number }): Promise<{ ok: true; url: string }>{
+	const { x1, y1, x2, y2 } = params;
+	if ([x1, y1, x2, y2].some(v => typeof v !== 'number' || isNaN(v))) {
+		const err = new Error('x1, y1, x2, y2 must be valid numbers');
+		(err as Error & { statusCode?: number }).statusCode = 400;
+		throw err;
+	}
+
+	return withTabLock(tabId, async () => {
+		await tabState.page.mouse.move(x1, y1);
+		await tabState.page.waitForTimeout(50);
+		await tabState.page.mouse.down();
+		await tabState.page.waitForTimeout(50);
+		await tabState.page.mouse.move(x2, y2);
+		await tabState.page.waitForTimeout(50);
+		await tabState.page.mouse.up();
+
+		log('info', 'dragMouse dispatched', { tabId, x1: x1.toFixed(0), y1: y1.toFixed(0), x2: x2.toFixed(0), y2: y2.toFixed(0) });
+
+		await tabState.page.waitForTimeout(500);
+		tabState.refs = await buildRefs(tabState.page);
+
+		const newUrl = tabState.page.url();
+		tabState.visitedUrls.add(newUrl);
+		return { ok: true as const, url: newUrl };
+	});
+}
+
 export async function screenshotTab(tabState: TabState, fullPage: boolean): Promise<Buffer> {
 	const buffer = await tabState.page.screenshot({ type: 'png', fullPage });
 	return buffer as Buffer;

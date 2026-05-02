@@ -37,12 +37,15 @@ import {
 	backTab,
 	buildSnapshotPayload,
 	buildRefs,
+	clickAt,
 	clickTab,
 	createTabState,
+	dragMouse,
 	evaluateTab,
 	evaluateTabExtended,
 	forwardTab,
 	getLinks,
+	moveMouseTo,
 	pressTab,
 	refreshTab,
 	screenshotTab,
@@ -617,6 +620,111 @@ router.post('/tabs/:tabId/click', async (req: Request<{ tabId: string }, unknown
 		const statusCode = (err as { statusCode?: number } | null)?.statusCode;
 		const message = err instanceof Error ? err.message : String(err);
 		log('error', 'click failed', { reqId: req.reqId, tabId, error: message });
+		if (statusCode === 400) return res.status(400).json({ error: message });
+		return res.status(500).json({ error: safeError(err) });
+	}
+});
+
+// Click at coordinates (x, y)
+router.post('/tabs/:tabId/click-at', async (req: Request<{ tabId: string }, unknown, { userId?: unknown; x?: number; y?: number }>, res: Response) => {
+	const tabId = req.params.tabId;
+	try {
+		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req, CONFIG.apiKey)) {
+			return res.status(403).json({ error: 'Forbidden' });
+		}
+
+		const userId = req.body.userId as string | undefined;
+		if (!userId) return res.status(400).json({ error: 'userId required' });
+		const rawX = req.body.x;
+		const rawY = req.body.y;
+		if (typeof rawX !== 'number' || typeof rawY !== 'number') return res.status(400).json({ error: 'x and y must be numbers' });
+		const found = findTabById(tabId, userId);
+		if (!found) return res.status(404).json({ error: 'Tab not found' });
+		const { tabState } = found;
+		tabState.toolCalls++;
+		const result = await withUserLimit(String(userId), CONFIG.maxConcurrentPerUser, () =>
+			withTimeout(clickAt(tabId, tabState, { x: rawX, y: rawY }), CONFIG.handlerTimeoutMs, 'click-at'),
+		);
+		const responseObj: Record<string, unknown> = { ...result };
+		const recentDownloads = getRecentDownloads(tabId, 2000);
+		if (recentDownloads.length > 0) {
+			responseObj.downloads = recentDownloads.map((d) => ({
+				id: d.id,
+				filename: d.suggestedFilename,
+				status: d.status,
+				size: d.size,
+			}));
+		}
+		log('info', 'clicked-at', { reqId: req.reqId, tabId, x: rawX, y: rawY, url: result.url });
+		return res.json(responseObj);
+	} catch (err) {
+		const statusCode = (err as { statusCode?: number } | null)?.statusCode;
+		const message = err instanceof Error ? err.message : String(err);
+		log('error', 'click-at failed', { reqId: req.reqId, tabId, error: message });
+		if (statusCode === 400) return res.status(400).json({ error: message });
+		return res.status(500).json({ error: safeError(err) });
+	}
+});
+
+// Move mouse to coordinates (x, y)
+router.post('/tabs/:tabId/mouse-move', async (req: Request<{ tabId: string }, unknown, { userId?: unknown; x?: number; y?: number }>, res: Response) => {
+	const tabId = req.params.tabId;
+	try {
+		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req, CONFIG.apiKey)) {
+			return res.status(403).json({ error: 'Forbidden' });
+		}
+
+		const userId = req.body.userId as string | undefined;
+		if (!userId) return res.status(400).json({ error: 'userId required' });
+		const rawX = req.body.x;
+		const rawY = req.body.y;
+		if (typeof rawX !== 'number' || typeof rawY !== 'number') return res.status(400).json({ error: 'x and y must be numbers' });
+		const found = findTabById(tabId, userId);
+		if (!found) return res.status(404).json({ error: 'Tab not found' });
+		const { tabState } = found;
+		tabState.toolCalls++;
+		const result = await withUserLimit(String(userId), CONFIG.maxConcurrentPerUser, () =>
+			withTimeout(moveMouseTo(tabId, tabState, { x: rawX, y: rawY }), CONFIG.handlerTimeoutMs, 'mouse-move'),
+		);
+		log('info', 'mouse-moved', { reqId: req.reqId, tabId, x: rawX, y: rawY, url: result.url });
+		return res.json(result);
+	} catch (err) {
+		const statusCode = (err as { statusCode?: number } | null)?.statusCode;
+		const message = err instanceof Error ? err.message : String(err);
+		log('error', 'mouse-move failed', { reqId: req.reqId, tabId, error: message });
+		if (statusCode === 400) return res.status(400).json({ error: message });
+		return res.status(500).json({ error: safeError(err) });
+	}
+});
+
+// Drag mouse from (x1, y1) to (x2, y2)
+router.post('/tabs/:tabId/mouse-drag', async (req: Request<{ tabId: string }, unknown, { userId?: unknown; x1?: number; y1?: number; x2?: number; y2?: number }>, res: Response) => {
+	const tabId = req.params.tabId;
+	try {
+		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req, CONFIG.apiKey)) {
+			return res.status(403).json({ error: 'Forbidden' });
+		}
+
+		const { userId, x1, y1, x2, y2 } = req.body;
+		if (!userId) return res.status(400).json({ error: 'userId required' });
+		if ([x1, y1, x2, y2].some(v => typeof v !== 'number')) return res.status(400).json({ error: 'x1, y1, x2, y2 must be numbers' });
+		const found = findTabById(tabId, userId);
+		const dx1 = req.body.x1 as number;
+		const dy1 = req.body.y1 as number;
+		const dx2 = req.body.x2 as number;
+		const dy2 = req.body.y2 as number;
+		if (!found) return res.status(404).json({ error: 'Tab not found' });
+		const { tabState } = found;
+		tabState.toolCalls++;
+		const result = await withUserLimit(String(userId), CONFIG.maxConcurrentPerUser, () =>
+			withTimeout(dragMouse(tabId, tabState, { x1: dx1, y1: dy1, x2: dx2, y2: dy2 }), CONFIG.handlerTimeoutMs, 'mouse-drag'),
+		);
+		log('info', 'mouse-dragged', { reqId: req.reqId, tabId, x1: dx1, y1: dy1, x2: dx2, y2: dy2, url: result.url });
+		return res.json(result);
+	} catch (err) {
+		const statusCode = (err as { statusCode?: number } | null)?.statusCode;
+		const message = err instanceof Error ? err.message : String(err);
+		log('error', 'mouse-drag failed', { reqId: req.reqId, tabId, error: message });
 		if (statusCode === 400) return res.status(400).json({ error: message });
 		return res.status(500).json({ error: safeError(err) });
 	}
