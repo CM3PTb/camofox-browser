@@ -118,14 +118,30 @@ async function spawnXvfb(resolution: string = '1920x1080x24'): Promise<{ display
 	}
 
 	const display = `:${displayNum}`;
+	// SECURITY: Xvfb TCP listening enabled for development.
+	// WARNING: Xvfb is running with -ac (no access control) and TCP listening on port 60099.
+	// This exposes the X11 protocol to all containers on the Docker network without authentication.
+	// Any container can:
+	//   - Capture full screen (including password fields)
+	//   - Inject keystrokes/mouse events
+	//   - Intercept input from all X11 applications
+	//
+	// TODO: Security hardening required before production.
+	// Options:
+	//   1. Remove -ac and use xauth for access control + TCP auth
+	//   2. Use Unix socket volume mount instead of TCP (recommended)
+	//   3. Add x11 forwarding proxy with SSH authentication
+	//   4. Implement X11 API proxy in this server (reuses existing auth boundary)
 	const xvfbProcess = spawn('Xvfb', [
 		display,
 		'-screen',
 		'0',
 		resolution,
 		'-ac',
-		'-nolisten',
-		'tcp',
+		// DEV-ONLY: TCP listening enabled for development. Remove -nolisten tcp for dev access.
+		// SECURITY: This exposes Xvfb to the Docker network without authentication.
+		// '-nolisten',
+		// 'tcp',
 	], { stdio: 'pipe' });
 
 	await new Promise<void>((resolve, reject) => {
